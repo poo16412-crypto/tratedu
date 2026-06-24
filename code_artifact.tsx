@@ -1,0 +1,614 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Building2, Users, GraduationCap, MapPin, Activity, Calendar, 
+  Menu, X, LayoutDashboard, Map, BookOpen, Award, FileText,
+  AlertCircle, RefreshCw, CheckCircle2, Filter, ChevronDown
+} from 'lucide-react';
+
+// ==========================================
+// ⚙️ ตั้งค่าลิงก์ฐานข้อมูล (Google Sheet CSV)
+// ==========================================
+const csvLinks = {
+  '2566': "https://docs.google.com/spreadsheets/d/e/2PACX-1vTyaHj1uAdOfJMsS54IAYPTG9eukh1nvpfviS5rSohWoWWExoKz1nSKAl_QVmD0gQutwIpTPfxz0YvL/pub?gid=82375566&single=true&output=csv",
+  '2567': "https://docs.google.com/spreadsheets/d/e/2PACX-1vTyaHj1uAdOfJMsS54IAYPTG9eukh1nvpfviS5rSohWoWWExoKz1nSKAl_QVmD0gQutwIpTPfxz0YvL/pub?gid=694847223&single=true&output=csv",
+  '2568': "https://docs.google.com/spreadsheets/d/e/2PACX-1vTyaHj1uAdOfJMsS54IAYPTG9eukh1nvpfviS5rSohWoWWExoKz1nSKAl_QVmD0gQutwIpTPfxz0YvL/pub?gid=1952817341&single=true&output=csv",
+};
+
+// ฟังก์ชันช่วยจัดกลุ่มอำเภอจากชื่อโรงเรียน
+const getDistrictFromName = (schoolName) => {
+  const name = schoolName || '';
+  if (name.includes('บ่อไร่') || name.includes('ช้างทูน') || name.includes('หนองบอน') || name.includes('ตากแว้ง') || name.includes('ด่านชุมพล') || name.includes('หนองม่วง') || name.includes('สระใหญ่')) return 'บ่อไร่';
+  if (name.includes('เขาสมิง') || name.includes('แสนตุ้ง') || name.includes('ห้วงพัฒนา') || name.includes('เจียรพัฒนา') || name.includes('ท่าโสม') || name.includes('ประณีต') || name.includes('อ่างกะป่อง')) return 'เขาสมิง';
+  if (name.includes('แหลมงอบ') || name.includes('บางกระดาน') || name.includes('น้ำเชี่ยว') || name.includes('บางปิด') || name.includes('คลองขวาง')) return 'แหลมงอบ';
+  if (name.includes('คลองใหญ่') || name.includes('ไม้รูด') || name.includes('หาดเล็ก') || name.includes('คลองมะขาม')) return 'คลองใหญ่';
+  if (name.includes('เกาะช้าง') || name.includes('สลักเพชร') || name.includes('คลองพร้าว') || name.includes('สลัก') || name.includes('อ่าวพร้าว')) return 'เกาะช้าง';
+  if (name.includes('เกาะกูด') || name.includes('คลองเจ้า') || name.includes('อ่าวสลัด')) return 'เกาะกูด';
+  return 'เมืองตราด'; // ค่าเริ่มต้น
+};
+
+// ฟังก์ชันอ่านไฟล์ CSV แบบปลอดภัย
+const parseCSVRow = (text) => {
+  let result = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inQuotes) {
+      if (char === '"') {
+        if (i + 1 < text.length && text[i + 1] === '"') { cur += '"'; i++; } 
+        else { inQuotes = false; }
+      } else { cur += char; }
+    } else {
+      if (char === '"') { inQuotes = true; } 
+      else if (char === ',') { result.push(cur); cur = ''; } 
+      else { cur += char; }
+    }
+  }
+  result.push(cur);
+  return result;
+};
+
+// --- Components ย่อย ---
+const KPICard = ({ title, value, icon: Icon, colorClass, subtitle, isLoading }) => (
+  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-start space-x-4">
+    <div className={`p-3 rounded-lg ${colorClass} bg-opacity-10 mt-1 shrink-0`}>
+      <Icon className={`w-6 h-6 ${colorClass.replace('bg-', 'text-').replace('-100', '-600').replace('-50', '-700')}`} />
+    </div>
+    <div className="min-w-0 flex-1">
+      <p className="text-xs font-medium text-gray-500 mb-1 truncate">{title}</p>
+      {isLoading ? (
+        <div className="h-8 w-24 bg-gray-200 animate-pulse rounded mt-1"></div>
+      ) : (
+        <h3 className="text-2xl font-bold text-gray-800">{value.toLocaleString()}</h3>
+      )}
+      {subtitle && <p className="text-xs text-gray-400 mt-1 truncate">{subtitle}</p>}
+    </div>
+  </div>
+);
+
+const VerticalBarChart = ({ data, title, icon: Icon, isLoading }) => {
+  const maxVal = data.length > 0 ? Math.max(...data.map(d => d.value)) : 100;
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex flex-col h-full min-h-[350px]">
+      <div className="flex items-center space-x-2 mb-6 border-b pb-4 shrink-0">
+        <Icon className="w-5 h-5 text-[#003366]" />
+        <h3 className="text-lg font-semibold text-gray-800 truncate">{title}</h3>
+      </div>
+      
+      {isLoading ? (
+        <div className="flex-grow flex items-end justify-between space-x-2 pt-4 opacity-50">
+           {[1,2,3,4,5,6,7].map(i => (
+             <div key={i} className="w-full flex justify-center items-end h-40">
+               <div className="w-full max-w-[32px] bg-gray-200 animate-pulse rounded-t-md" style={{height: `${Math.random() * 80 + 20}%`}}></div>
+             </div>
+           ))}
+        </div>
+      ) : (
+        <div className="flex-grow flex items-end justify-between space-x-1 sm:space-x-2 pt-4">
+          {data.map((item, index) => {
+            const heightPercent = maxVal === 0 ? 0 : (item.value / maxVal) * 100;
+            return (
+              <div key={index} className="flex flex-col items-center flex-1 group relative h-full justify-end">
+                <div className="relative w-full flex justify-center items-end h-[200px]">
+                  <div className="absolute -top-8 bg-gray-800 text-white text-[10px] sm:text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                    {item.value.toLocaleString()}
+                  </div>
+                  <div 
+                    className="w-full max-w-[24px] sm:max-w-[40px] bg-[#003366] hover:bg-[#D4AF37] transition-colors duration-300 rounded-t-sm"
+                    style={{ height: `${heightPercent}%` }}
+                  ></div>
+                </div>
+                <span className="text-[10px] sm:text-xs text-gray-600 mt-2 text-center truncate w-full px-1">
+                  {item.name.replace('เมืองตราด', 'เมือง').replace('แหลมงอบ', 'แหลมฯ')}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const UserCheck = (props) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><polyline points="16 11 18 13 22 9" /></svg>
+);
+
+// --- Main Application ---
+export default function App() {
+  const [selectedYear, setSelectedYear] = useState('2568');
+  
+  const [activeMenu, setActiveMenu] = useState('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [selectedDistrictFilter, setSelectedDistrictFilter] = useState('ทั้งหมด');
+  
+  // State ฐานข้อมูล
+  const [liveData, setLiveData] = useState({
+    schools: [], totalStudents: 0, totalTeachers: 0, types: [], districts: []
+  });
+  const [isLoading, setIsLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState('');
+  const [fetchError, setFetchError] = useState(false);
+
+  // โหลดข้อมูลอัตโนมัติเมื่อค่า selectedYear เปลี่ยนแปลง
+  useEffect(() => {
+    const fetchSheetData = async () => {
+      setIsLoading(true);
+      setFetchError(false);
+      try {
+        const csvUrl = csvLinks[selectedYear];
+        if (!csvUrl) throw new Error('ไม่พบลิงก์ฐานข้อมูลสำหรับปีนี้');
+
+        const response = await fetch(csvUrl);
+        if (!response.ok) throw new Error('Network response was not ok');
+        
+        const csvText = await response.text();
+        const lines = csvText.split('\n').filter(line => line.trim() !== '');
+        
+        const parsedSchools = [];
+        const parseIntSafe = (val) => parseInt(val, 10) || 0;
+
+        for (let i = 1; i < lines.length; i++) {
+          const row = parseCSVRow(lines[i]);
+          if (row.length >= 12 && !isNaN(parseInt(row[0], 10))) {
+            const schoolName = row[1]?.trim() || 'ไม่ระบุ';
+            parsedSchools.push({
+              name: schoolName,
+              district: getDistrictFromName(schoolName),
+              blind: parseIntSafe(row[2]),
+              deaf: parseIntSafe(row[3]),
+              id: parseIntSafe(row[4]),
+              physical: parseIntSafe(row[5]),
+              ld: parseIntSafe(row[6]),
+              speech: parseIntSafe(row[7]),
+              behavior: parseIntSafe(row[8]),
+              autism: parseIntSafe(row[9]),
+              multiple: parseIntSafe(row[10]),
+              total: parseIntSafe(row[11]),
+              teacher: parseIntSafe(row[12])
+            });
+          }
+        }
+
+        const totalStu = parsedSchools.reduce((acc, curr) => acc + curr.total, 0);
+        const totalTeach = parsedSchools.reduce((acc, curr) => acc + curr.teacher, 0);
+
+        const typesAggr = [
+          { name: '5. การเรียนรู้ (LD)', value: parsedSchools.reduce((acc, curr) => acc + curr.ld, 0) },
+          { name: '3. สติปัญญา', value: parsedSchools.reduce((acc, curr) => acc + curr.id, 0) },
+          { name: '8. ออทิสติก', value: parsedSchools.reduce((acc, curr) => acc + curr.autism, 0) },
+          { name: '4. ร่างกายฯ', value: parsedSchools.reduce((acc, curr) => acc + curr.physical, 0) },
+          { name: '7. พฤติกรรมฯ', value: parsedSchools.reduce((acc, curr) => acc + curr.behavior, 0) },
+          { name: '6. การพูดและภาษา', value: parsedSchools.reduce((acc, curr) => acc + curr.speech, 0) },
+          { name: '9. พิการซ้อน', value: parsedSchools.reduce((acc, curr) => acc + curr.multiple, 0) },
+          { name: '2. การได้ยิน', value: parsedSchools.reduce((acc, curr) => acc + curr.deaf, 0) },
+          { name: '1. การเห็น', value: parsedSchools.reduce((acc, curr) => acc + curr.blind, 0) }
+        ].sort((a, b) => b.value - a.value);
+
+        const distMap = {};
+        parsedSchools.forEach(s => {
+          distMap[s.district] = (distMap[s.district] || 0) + s.total;
+        });
+        const distAggr = Object.keys(distMap).map(k => ({ name: k, value: distMap[k] })).sort((a, b) => b.value - a.value);
+
+        setLiveData({
+          schools: parsedSchools,
+          totalStudents: totalStu,
+          totalTeachers: totalTeach,
+          types: typesAggr,
+          districts: distAggr
+        });
+        
+        const now = new Date();
+        setLastUpdated(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')} น.`);
+        
+      } catch (error) {
+        console.error("Error fetching data:", error);
+        setFetchError(true);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchSheetData();
+  }, [selectedYear]);
+
+  // ฟังก์ชันดาวน์โหลดข้อมูลเป็น CSV
+  const handleExportCSV = (isDistrictView) => {
+    const displaySchools = (isDistrictView && selectedDistrictFilter !== 'ทั้งหมด') 
+      ? liveData.schools.filter(s => s.district === selectedDistrictFilter)
+      : liveData.schools;
+
+    if (displaySchools.length === 0) return;
+
+    const headers = ['ที่', 'ชื่อโรงเรียน', 'อำเภอ', 'รวมเด็ก', '1.เห็น', '2.ได้ยิน', '3.ปัญญา', '4.ร่างกาย', '5.LD', '6.พูด', '7.พฤติกรรม', '8.ออทิสติก', '9.ซ้อน', 'พี่เลี้ยง'];
+    const csvRows = [headers.join(',')];
+
+    displaySchools.forEach((school, idx) => {
+      const row = [
+        idx + 1,
+        `"${school.name}"`, // ป้องกันลูกน้ำในชื่อโรงเรียน
+        school.district,
+        school.total,
+        school.blind, school.deaf, school.id, school.physical, school.ld, school.speech, school.behavior, school.autism, school.multiple, school.teacher
+      ];
+      csvRows.push(row.join(','));
+    });
+
+    // เพิ่มแถวรวมผล
+    const totalRow = [
+       '', 'รวมผลกรอง', '',
+       displaySchools.reduce((acc, curr) => acc + curr.total, 0),
+       displaySchools.reduce((acc, curr) => acc + curr.blind, 0),
+       displaySchools.reduce((acc, curr) => acc + curr.deaf, 0),
+       displaySchools.reduce((acc, curr) => acc + curr.id, 0),
+       displaySchools.reduce((acc, curr) => acc + curr.physical, 0),
+       displaySchools.reduce((acc, curr) => acc + curr.ld, 0),
+       displaySchools.reduce((acc, curr) => acc + curr.speech, 0),
+       displaySchools.reduce((acc, curr) => acc + curr.behavior, 0),
+       displaySchools.reduce((acc, curr) => acc + curr.autism, 0),
+       displaySchools.reduce((acc, curr) => acc + curr.multiple, 0),
+       displaySchools.reduce((acc, curr) => acc + curr.teacher, 0)
+    ];
+    csvRows.push(totalRow.join(','));
+
+    // ใส่ BOM (\uFEFF) เพื่อให้ Excel อ่านภาษาไทย (UTF-8) ได้ถูกต้อง
+    const csvContent = "\uFEFF" + csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `ข้อมูลนักเรียนเรียนรวม_ปี${selectedYear}_${isDistrictView ? selectedDistrictFilter : 'ทั้งหมด'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const menuItems = [
+    { id: 'dashboard', label: 'รายงานข้อมูลนักเรียนเรียนรวม', icon: LayoutDashboard },
+    { id: 'schools', label: 'ข้อมูลระดับโรงเรียน', icon: Building2 },
+    { id: 'district', label: 'รายงานระดับอำเภอ', icon: Map },
+    { id: 'disability', label: 'จำแนกตามประเภทความพิการ', icon: Activity },
+    { id: 'teachers', label: 'พี่เลี้ยงเด็กพิการ', icon: Users },
+  ];
+
+  const districtList = ['ทั้งหมด', 'เมืองตราด', 'เขาสมิง', 'บ่อไร่', 'แหลมงอบ', 'คลองใหญ่', 'เกาะช้าง', 'เกาะกูด'];
+
+  const renderDashboard = () => (
+    <div className="space-y-6 w-full">
+      {fetchError ? (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center text-sm w-full">
+          <AlertCircle className="w-5 h-5 mr-2 shrink-0" />
+          <span>ไม่สามารถดึงข้อมูลจาก Google Sheet ของปี {selectedYear} ได้ กรุณาตรวจสอบลิงก์</span>
+        </div>
+      ) : (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-lg flex items-center justify-between text-sm w-full shadow-sm">
+          <div className="flex items-center">
+            <CheckCircle2 className="w-5 h-5 mr-2 shrink-0 text-emerald-600" />
+            <span>เชื่อมต่อฐานข้อมูล Google Sheet ปีการศึกษา {selectedYear} เรียบร้อยแล้ว</span>
+          </div>
+          {!isLoading && lastUpdated && (
+            <div className="text-xs text-emerald-600 hidden sm:flex items-center bg-white px-2 py-1 rounded shadow-sm">
+              <RefreshCw className="w-3 h-3 mr-1" /> ล่าสุด {lastUpdated}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 w-full">
+        <KPICard title="จำนวนโรงเรียนทั้งหมด" value={liveData.schools.length} icon={Building2} colorClass="bg-blue-100" subtitle="แห่งที่มีนักเรียนเรียนรวม" isLoading={isLoading} />
+        <KPICard title="นักเรียนเรียนรวมทั้งหมด" value={liveData.totalStudents} icon={GraduationCap} colorClass="bg-amber-100" subtitle="คน" isLoading={isLoading} />
+        <KPICard title="พี่เลี้ยงเด็กพิการ" value={liveData.totalTeachers} icon={UserCheck} colorClass="bg-emerald-100" subtitle="อัตรา" isLoading={isLoading} />
+        <KPICard title="โครงการส่งเสริมฯ" value={15} icon={Award} colorClass="bg-purple-100" subtitle="โครงการ (คงที่)" isLoading={false} />
+      </div>
+      
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
+        <VerticalBarChart title="นักเรียนเรียนรวม จำแนกตามอำเภอ" data={liveData.districts} icon={MapPin} isLoading={isLoading} />
+        
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex flex-col w-full min-h-[350px]">
+          <div className="flex items-center space-x-2 mb-6 border-b pb-4 shrink-0">
+             <Activity className="w-5 h-5 text-[#003366]" />
+             <h3 className="text-lg font-semibold text-gray-800">สัดส่วนตามประเภทความบกพร่อง</h3>
+          </div>
+          {isLoading ? (
+             <div className="flex flex-col justify-center space-y-5 py-4">
+                {[1,2,3,4,5].map(i => (
+                  <div key={i} className="w-full">
+                    <div className="h-4 bg-gray-200 rounded w-1/3 mb-2 animate-pulse"></div>
+                    <div className="h-2 bg-gray-100 rounded-full w-full"><div className="h-2 bg-gray-300 rounded-full animate-pulse" style={{width: `${Math.random()*60+20}%`}}></div></div>
+                  </div>
+                ))}
+             </div>
+          ) : (
+            <div className="space-y-4 flex-grow w-full overflow-y-auto pr-2 custom-scrollbar">
+              {liveData.types.map((item, idx) => {
+                const maxVal = Math.max(...liveData.types.map(d=>d.value));
+                return (
+                  <div key={idx} className="w-full group">
+                    <div className="flex justify-between text-sm mb-1.5">
+                      <span className="text-gray-700 truncate pr-2 group-hover:text-[#003366] group-hover:font-medium transition-colors">{item.name}</span>
+                      <span className="font-bold text-[#003366] shrink-0 bg-blue-50 px-2 rounded">{item.value.toLocaleString()} คน</span>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-2.5">
+                      <div 
+                        className="bg-[#D4AF37] h-2.5 rounded-full transition-all duration-1000 group-hover:bg-[#003366]" 
+                        style={{ width: maxVal === 0 ? '0%' : `${(item.value / maxVal) * 100}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderDisabilitySummary = () => (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 w-full mb-8 overflow-hidden">
+      <div className="p-4 sm:p-6 border-b border-gray-200 bg-[#003366] text-white flex justify-between items-center">
+         <div className="flex items-center space-x-3">
+           <Activity className="w-6 h-6 text-[#D4AF37]" />
+           <h3 className="text-lg font-semibold">สรุปข้อมูลจำแนกตาม 9 ประเภทความพิการ (ปี {selectedYear})</h3>
+         </div>
+      </div>
+      
+      {isLoading ? (
+        <div className="p-20 flex justify-center"><RefreshCw className="w-10 h-10 animate-spin text-[#003366]" /></div>
+      ) : (
+        <div className="p-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            {liveData.types.map((type, idx) => (
+              <div key={idx} className="p-5 rounded-xl border border-gray-100 bg-gray-50 hover:bg-blue-50/50 hover:border-blue-200 transition-all shadow-sm flex flex-col justify-between group">
+                 <span className="font-medium text-gray-600 text-sm group-hover:text-[#003366]">{type.name}</span>
+                 <div className="mt-4 flex items-end justify-between">
+                   <span className="text-3xl font-bold text-[#003366]">{type.value.toLocaleString()}</span>
+                   <span className="text-xs text-gray-400 mb-1">คน</span>
+                 </div>
+                 <div className="w-full bg-gray-200 rounded-full h-1 mt-3">
+                    <div className="bg-[#D4AF37] h-1 rounded-full" style={{ width: `${(type.value / liveData.totalStudents) * 100}%` }}></div>
+                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderTable = (isDistrictView = false) => {
+    const displaySchools = (isDistrictView && selectedDistrictFilter !== 'ทั้งหมด') 
+      ? liveData.schools.filter(s => s.district === selectedDistrictFilter)
+      : liveData.schools;
+
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col h-[calc(100vh-140px)] sm:h-[calc(100vh-160px)]">
+        <div className="p-4 border-b border-gray-200 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shrink-0">
+           <div className="min-w-0 flex items-center space-x-3">
+             <div className="bg-[#003366] p-2 rounded-lg text-white">
+               {isDistrictView ? <Map className="w-5 h-5" /> : <Building2 className="w-5 h-5" />}
+             </div>
+             <div>
+               <h3 className="text-base sm:text-lg font-semibold text-gray-800">
+                 {isDistrictView ? 'รายงานข้อมูลแยกตามระดับอำเภอ' : 'ข้อมูลจำนวนนักเรียนรายโรงเรียน'}
+               </h3>
+               <p className="text-xs text-gray-500 mt-1">อ้างอิงข้อมูล: ปีการศึกษา {selectedYear}</p>
+             </div>
+           </div>
+           
+           <div className="flex items-center space-x-2 w-full sm:w-auto">
+             {isDistrictView && (
+               <div className="relative flex-1 sm:flex-none">
+                 <select 
+                   value={selectedDistrictFilter}
+                   onChange={(e) => setSelectedDistrictFilter(e.target.value)}
+                   className="bg-white border border-gray-300 hover:border-[#003366] text-sm text-[#003366] font-medium rounded-lg px-3 py-2 shadow-sm w-full sm:w-40 cursor-pointer outline-none focus:ring-2 focus:ring-[#003366]/20"
+                 >
+                   {districtList.map(d => <option key={d} value={d}>{d}</option>)}
+                 </select>
+               </div>
+             )}
+             <button 
+               onClick={() => handleExportCSV(isDistrictView)}
+               className="flex items-center justify-center space-x-2 text-xs sm:text-sm text-white bg-[#003366] hover:bg-[#002244] px-3 py-2 sm:px-4 rounded-lg transition-colors shrink-0"
+             >
+               <FileText className="w-4 h-4" /> <span className="hidden sm:inline">Export Excel</span>
+             </button>
+           </div>
+        </div>
+        
+        <div className="flex-1 min-h-0 relative bg-white rounded-b-xl">
+          {isLoading ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
+              <RefreshCw className="w-10 h-10 animate-spin mb-4 text-[#003366]" />
+              <p>กำลังโหลดข้อมูล...</p>
+            </div>
+          ) : (
+            <div className="absolute inset-0 overflow-auto custom-scrollbar">
+              {displaySchools.length > 0 ? (
+                <table className="w-full text-[11px] sm:text-xs text-left border-collapse min-w-[900px]">
+                  <thead className="text-gray-700 uppercase bg-gray-100 sticky top-0 z-20 shadow-sm">
+                    <tr>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 sticky left-0 bg-gray-100 z-30 border-b border-r border-gray-200">ที่</th>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 sticky left-[36px] sm:left-[48px] bg-gray-100 z-30 border-b border-r border-gray-200 w-[200px]">ชื่อโรงเรียน</th>
+                      {isDistrictView && <th className="px-2 py-2 sm:px-4 sm:py-3 border-b border-gray-200 text-gray-500">อำเภอ</th>}
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 text-center text-[#003366] font-bold border-b border-gray-200">รวมเด็ก</th>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 text-center border-b border-gray-200">1.เห็น</th>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 text-center border-b border-gray-200">2.ได้ยิน</th>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 text-center border-b border-gray-200">3.ปัญญา</th>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 text-center border-b border-gray-200">4.ร่างกาย</th>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 text-center bg-blue-50/50 border-b border-gray-200">5.LD</th>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 text-center border-b border-gray-200">6.พูด</th>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 text-center border-b border-gray-200">7.พฤติกรรม</th>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 text-center border-b border-gray-200">8.ออทิสติก</th>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 text-center border-b border-gray-200">9.ซ้อน</th>
+                      <th className="px-2 py-2 sm:px-4 sm:py-3 text-center text-emerald-700 font-bold border-b border-gray-200">พี่เลี้ยง</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    {displaySchools.map((school, idx) => (
+                      <tr key={idx} className="hover:bg-blue-50/30 transition-colors group">
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-gray-500 sticky left-0 bg-white group-hover:bg-gray-50 z-10 border-r border-gray-100">{idx + 1}</td>
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 font-medium text-gray-900 sticky left-[36px] sm:left-[48px] bg-white group-hover:bg-gray-50 z-10 border-r border-gray-100 truncate w-[200px]" title={school.name}>{school.name}</td>
+                        {isDistrictView && <td className="px-2 py-2 sm:px-4 sm:py-3 text-gray-500">{school.district}</td>}
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-center font-bold text-[#003366] bg-gray-50/30">{school.total}</td>
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-gray-600">{school.blind || '-'}</td>
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-gray-600">{school.deaf || '-'}</td>
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-gray-600">{school.id || '-'}</td>
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-gray-600">{school.physical || '-'}</td>
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-center font-bold text-blue-600 bg-blue-50/10">{school.ld || '-'}</td>
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-gray-600">{school.speech || '-'}</td>
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-gray-600">{school.behavior || '-'}</td>
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-gray-600">{school.autism || '-'}</td>
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-gray-600">{school.multiple || '-'}</td>
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-emerald-600 font-bold">{school.teacher || '-'}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-gray-50 font-bold sticky bottom-0 z-10 shadow-[0_-1px_0_0_#d1d5db]">
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 sticky left-0 bg-gray-50 z-20 border-r border-gray-200"></td>
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-right sticky left-[36px] sm:left-[48px] bg-gray-50 z-20 border-r border-gray-200">รวมผลกรอง</td>
+                      {isDistrictView && <td className="px-2 py-2 sm:px-4 sm:py-3 bg-gray-50 border-r border-gray-200"></td>}
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-[#003366]">{displaySchools.reduce((acc, curr) => acc + curr.total, 0)}</td>
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-center">{displaySchools.reduce((acc, curr) => acc + curr.blind, 0) || 0}</td>
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-center">{displaySchools.reduce((acc, curr) => acc + curr.deaf, 0) || 0}</td>
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-center">{displaySchools.reduce((acc, curr) => acc + curr.id, 0) || 0}</td>
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-center">{displaySchools.reduce((acc, curr) => acc + curr.physical, 0) || 0}</td>
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-blue-600">{displaySchools.reduce((acc, curr) => acc + curr.ld, 0) || 0}</td>
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-center">{displaySchools.reduce((acc, curr) => acc + curr.speech, 0) || 0}</td>
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-center">{displaySchools.reduce((acc, curr) => acc + curr.behavior, 0) || 0}</td>
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-center">{displaySchools.reduce((acc, curr) => acc + curr.autism, 0) || 0}</td>
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-center">{displaySchools.reduce((acc, curr) => acc + curr.multiple, 0) || 0}</td>
+                      <td className="px-2 py-2 sm:px-4 sm:py-3 text-center text-emerald-700">{displaySchools.reduce((acc, curr) => acc + curr.teacher, 0) || 0}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              ) : (
+                <div className="h-full flex items-center justify-center p-8 text-center text-gray-500 flex-col">
+                   <AlertCircle className="w-8 h-8 mb-2 text-gray-300" />
+                   ไม่พบข้อมูลโรงเรียนในอำเภอที่คุณเลือก
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="h-screen w-full bg-[#f4f7f9] flex font-sans text-gray-800 overflow-hidden relative">
+      
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-[#001833]/60 backdrop-blur-sm z-30 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        ></div>
+      )}
+
+      <aside 
+        className={`fixed lg:static inset-y-0 left-0 z-40 h-full bg-[#002244] text-white transition-transform duration-300 ease-in-out flex flex-col shadow-2xl lg:shadow-none w-64 ${
+          isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 lg:w-20 xl:w-64'
+        }`}
+      >
+        <div className="flex items-center justify-between h-16 px-4 bg-[#001833] shrink-0 border-b border-[#003366]">
+          <div className={`flex items-center space-x-3 overflow-hidden ${!isSidebarOpen ? 'lg:hidden xl:flex' : ''}`}>
+            <GraduationCap className="w-8 h-8 text-[#D4AF37] shrink-0" />
+            <div className="whitespace-nowrap">
+              <span className="font-bold text-base block leading-tight tracking-wide truncate">สพป.ตราด</span>
+              <span className="text-[10px] text-gray-400 block truncate">ระบบสารสนเทศเรียนรวม</span>
+            </div>
+          </div>
+          <button className="lg:hidden text-gray-400 hover:text-white p-1" onClick={() => setIsSidebarOpen(false)}>
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1 custom-scrollbar">
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeMenu === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveMenu(item.id);
+                  if (window.innerWidth < 1024) setIsSidebarOpen(false);
+                }}
+                className={`w-full flex items-center space-x-3 px-3 py-3 rounded-lg transition-all duration-200 group ${
+                  isActive 
+                    ? 'bg-[#D4AF37] text-[#002244] font-bold shadow-md' 
+                    : 'text-gray-300 hover:bg-white/10 hover:text-white'
+                } ${!isSidebarOpen ? 'lg:justify-center xl:justify-start' : ''}`}
+              >
+                <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'text-[#002244]' : 'text-gray-400 group-hover:text-white'}`} />
+                <span className={`text-sm text-left truncate ${!isSidebarOpen ? 'lg:hidden xl:block' : ''}`}>
+                  {item.label}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+
+      <div className="flex-1 flex flex-col min-w-0 h-full w-full overflow-hidden relative">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-6 z-50 shrink-0 shadow-sm w-full relative">
+          <div className="flex items-center min-w-0">
+            <button 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-1.5 sm:p-2 mr-2 sm:mr-3 text-gray-500 hover:bg-gray-100 rounded-md transition-colors lg:hidden"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <h1 className="text-sm sm:text-lg font-bold text-[#003366] truncate">
+              {menuItems.find(m => m.id === activeMenu)?.label}
+            </h1>
+          </div>
+
+          {/* ========================================================= */}
+          {/* ปุ่ม Dropdown ปีการศึกษา (ปรับใช้ Native พื้นฐาน ลดบั๊กใน iFrame/Google Sites) */}
+          {/* ========================================================= */}
+          <div className="relative z-[60]">
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              className="bg-white border-2 border-[#003366]/30 hover:border-[#003366] text-[#003366] text-xs sm:text-sm font-bold rounded-lg focus:ring-4 focus:ring-[#003366]/20 block w-full px-3 py-2 cursor-pointer shadow-sm transition-all"
+              style={{ minWidth: '140px', cursor: 'pointer' }}
+            >
+              <option value="2568">📅 ปีการศึกษา 2568</option>
+              <option value="2567">📅 ปีการศึกษา 2567</option>
+              <option value="2566">📅 ปีการศึกษา 2566</option>
+            </select>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 custom-scrollbar relative z-0">
+          <div className="max-w-[1600px] mx-auto h-full">
+            {activeMenu === 'dashboard' ? renderDashboard() : 
+             activeMenu === 'schools' ? renderTable(false) : 
+             activeMenu === 'district' ? renderTable(true) :
+             activeMenu === 'disability' ? renderDisabilitySummary() :
+             (
+                <div className="flex flex-col items-center justify-center h-[calc(100vh-160px)] bg-white rounded-xl border border-dashed border-gray-300 p-4 text-center">
+                  <BookOpen className="w-12 h-12 text-gray-300 mb-3" />
+                  <h3 className="text-lg font-medium text-gray-500">เมนู: {menuItems.find(m => m.id === activeMenu)?.label}</h3>
+                  <p className="text-sm text-gray-400 mt-1">ฟังก์ชันนี้อยู่ระหว่างการพัฒนา</p>
+                </div>
+             )}
+          </div>
+        </main>
+      </div>
+      
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        aside .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); }
+        aside .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
+        table { border-spacing: 0; }
+        th, td { background-clip: padding-box; }
+      `}} />
+    </div>
+  );
+}
